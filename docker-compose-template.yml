@@ -1,0 +1,116 @@
+version: "3"
+
+services:
+
+  datastore:
+    build:
+      context: ./tools/mysql
+      dockerfile: Dockerfile
+    image: mysql-datastore
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - microservicesnet
+              
+  oauth2-authorization-service:
+    build:
+      context: ./oauth2-authorization-service
+      dockerfile: Dockerfile
+    image: oauth2-authorization-service
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://datastore:3306/auth_db
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=password
+    entrypoint: ./wait-for datastore:3306 -t 300 -- java $JAVA_OPTS -Djava.security.egd=file:/dev/./urandom -jar /app.jar
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - microservicesnet
+    depends_on:
+      - datastore      
+
+  oauth2-resource-service-demo:
+    build:
+      context: ./oauth2-resource-service-demo
+      dockerfile: Dockerfile
+    image: oauth2-resource-service-demo
+    environment:
+      - OAUTH2_TOKENINFOURI=http://$HOST_NAME$:$PORT1$/auth-service/oauth/check_token
+      - OAUTH2_CLIENTID=demo-service
+      - OAUTH2_CLIENTSECRET=password
+      - DEPENDENTSERVICES_SECURITYSERVICEURI=http://$HOST_NAME$:$PORT1$/auth-service  
+    entrypoint: ./wait-for oauth2-authorization-service:8000 -t 300 -- java $JAVA_OPTS -Djava.security.egd=file:/dev/./urandom -jar /app.jar
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - microservicesnet
+    depends_on:
+      - oauth2-authorization-service
+
+  oauth2-client-app-demo:
+    build:
+      context: ./oauth2-client-app-demo
+      dockerfile: Dockerfile
+    image: oauth2-client-app-demo
+    environment:
+      - SECURITY_OAUTH2_CLIENT_CLIENTID=demo-client-app
+      - SECURITY_OAUTH2_CLIENT_CLIENTSECRET=secret
+      - SECURITY_OAUTH2_CLIENT_ACCESSTOKENURI=http://$HOST_NAME$:$PORT1$/auth-service/oauth/token
+      - SECURITY_OAUTH2_CLIENT_USERAUTHORIZATIONURI=http://$HOST_NAME$:$PORT1$/auth-service/oauth/authorize
+      - SECURITY_OAUTH2_CLIENT_TOKENVALIDATEURI=http://$HOST_NAME$:$PORT1$/auth-service/user/invalidateToken
+      - SECURITY_OAUTH2_CLIENT_PRE_ESTABLISHED_REDIRECT_URI=http://$HOST_NAME$:$PORT1$/client-app/login
+      - SECURITY_OAUTH2_CLIENT_REGISTERED_REDIRECT_URI=http://$HOST_NAME$:$PORT1$/client-app/login
+      - SECURITY_OAUTH2_CLIENT_USE_CURRENT_URI=false
+      - SECURITY_OAUTH2_RESOURCE_USERINFOURI=http://$HOST_NAME$:$PORT1$/auth-service/user/me
+      - DEPENDENTSERVICES_DEMOSERVICEURI=http://$HOST_NAME$:$PORT1$/demo-service
+    entrypoint: ./wait-for oauth2-authorization-service:8000 -t 300 -- java $JAVA_OPTS -Djava.security.egd=file:/dev/./urandom -jar /app.jar
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - microservicesnet
+    depends_on:
+      - oauth2-authorization-service
+
+  edge-service:
+    build:
+      context: ./edge-service
+      dockerfile: Dockerfile
+    image: edge-service
+    entrypoint: ./wait-for oauth2-client-app-demo:8080 -t 300 -- java $JAVA_OPTS -Djava.security.egd=file:/dev/./urandom -jar /app.jar
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "$PORT1$:80"
+    networks:
+      - microservicesnet
+    depends_on:
+      - oauth2-client-app-demo
+      
+  visualizer:
+    image: dockersamples/visualizer
+    ports:
+      - "$PORT2$:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    networks:
+      - microservicesnet
+
+networks:
+  microservicesnet:
+    driver: overlay
+   
