@@ -1,0 +1,15 @@
+zuul:
+  routes:
+    authService:
+      path: /auth-service/**
+      url: http://oauth2-authorization-service:8000/auth-service/
+      sensitiveHeaders:
+    demoService:
+      path: /demo-service/**
+      url: http://oauth2-resource-service-demo:8090/demo-service/
+      sensitiveHeaders:
+    clientApplication:
+      path: /client-app/**
+      url: http://oauth2-client-app-demo:8080/client-app/
+      sensitiveHeaders:
+      
